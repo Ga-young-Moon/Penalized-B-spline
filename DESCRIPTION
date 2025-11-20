@@ -1,0 +1,10 @@
+Package: Pspline
+Title: Penalized B-spline Regression with Visualization
+Version: 0.0.0.9000
+Authors@R: 
+    person("Ga young", "Moon", , "rkduddl881@gmail.com", role = c("aut", "cre"))
+Description: Fitting a regression spline based on penalized B-spline basis.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
