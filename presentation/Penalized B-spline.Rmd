@@ -1,0 +1,426 @@
+---
+title: "Penalized B-spline"
+author: "Gayoung Moon"
+date: "2025-06-06"
+institute: School of Mathematics, Statistics and Data Science \newline Sungshin Women’s University
+fonttheme: "serif"
+fontsize: 8pt
+output:
+  beamer_presentation:
+    latex_engine: xelatex 
+    theme: "metropolis"
+header-includes:
+  - \input{header_includes.tex}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Introduction
+
+## What Is Penalized B-spline
+
+- Penalized B-spline(P-spline) is a spline method that adds a penalty term to B-spline to create a smoother curve.
+\vt
+\vt
+
+- P-spline can solve the problems that occur in B-spline regression:
+\vt
+  - The problem sensitive to number or location of knots.
+\vt
+  - The problem that the model is too flexible and vibrates.
+
+
+## The Function of P-spline
+
+- The following is the function of P-spline:
+$$
+\hat{y}= \sum^K_{j=1} \beta_j B_j(x)
+$$
+\vt
+
+and we minimize the equation that follows as:
+$$
+\begin{aligned}
+&\min_\beta \{ \Vert y - B \beta \Vert^2 + \lambda \Vert D^{(d)} \beta \Vert^2 \} \\
+= &\min_\beta \bigg \{\sum^n_{i=1} \Big(y_i - \sum^K_{j=1} \beta_j B_j(x_i) \Big)^2 + \lambda \sum^K_{j=1}( \Delta^d \beta_j)^2 \bigg \}.
+\end{aligned}
+$$
+
+
+## The Coefficient of P-spline
+
+- We can also compute the coefficient of P-spline $\hat{\beta}$ like:
+$$
+\hat{\beta} = \Big( B^{\top}B + \lambda D^{(d)\top}D^{(d)} \Big)^{-1} B^{\top} y.
+$$
+\vt
+\vt
+
+- $y$: vector of the responses that are observed,
+\newline
+$B$: design matrix based on B-spline basis,
+\newline
+$\beta$: vector of B-spline coefficients,
+\newline
+$\lambda$: smoothing parameter,
+\newline
+$D^{(d)}$: difference matrix that computes the $d$-th order difference of $\beta$.
+
+
+# **P-spline** Package in R
+
+## P-spline Package
+
+- P-spline package is a package that receives the number of knots, adjusts their positions, and performs penalized b-spline regression.
+\vt
+\vt
+
+```{r, results= 'asis', echo= FALSE}
+knitr::kable(data.frame(
+  'function' = c("knots", "bspline_basis", "fit_pspline", "predict_pspline", "plot_pspline"),
+  'explain' = c("Function of knots sequence using the quantiles of the data", "B-spline basis function and design matrix of B-spline basis", "Fitting P-spline model", "Predicting the values of y for given x based on P-spline", "Drawing a plot of P-spline")
+), align = c('c', 'l'))
+```
+
+
+## The Variables Using in Package
+
+```{r, results= 'asis', echo= FALSE}
+knitr::kable(data.frame(
+  'variable' = c("x", "new_x", "grid_x", "x_values", "y_values", "model", "interior_knots", "dimension", "degree", "lambda", "diff_order"),
+  'explain' = c("Numeric vector of the data", "Numeric vector expressing a grid of evaluation points", "Numeric vector with a grid of evaluation points", "Numeric vector of x (input)", "Numeric vector of y (response)", "Function that fit P-spline with given data points",  "Vector of interior knots", "Number of the basis function", "Degree of spline(default= 3)", "Smoothing parameter (default = 1e-2)", "Order of the difference penalty (default = 2)")
+), align = c('c', 'l'))
+```
+
+
+## Computing Knots Using **quantile**
+
+```{r, echo= TRUE}
+knots_quantile <- function(x, dimension, degree = 3){
+  dimension = max(dimension, degree + 1)
+  num_interior = dimension - degree - 1
+  
+  if (num_interior > 0){
+    probs <- (1:num_interior)/(num_interior + 1)
+    interior_knots <- quantile(x, probs, type = 1)
+  } 
+  else{
+    interior_knots <- numeric(0)
+  }
+
+  return(interior_knots)
+}
+```
+
+
+## Adding Boundary Knots to Interior Knots
+
+```{r, echo= TRUE}
+# Add boundary knots to interior knots.
+
+add_boundary_knots <- function(x, interior_knots, degree = 3, tiny = 1e-5){
+  knots<- c(rep(min(x) - tiny, degree + 1),
+            interior_knots, rep(max(x) + tiny,
+            degree + 1))
+  return(knots)
+}
+```
+
+
+## Definition B-spline Basis Function
+
+```{r, echo= TRUE}
+# B-spline basis function
+
+b_spline <- function(x, knots, degree, i){
+  # Base case: 0th degree
+  if (degree == 0){
+    return(ifelse(knots[i] <= x & x < knots[i + 1], 1, 0))
+  }
+
+  # Recursive case: degree > 0
+  B_i_d1 <- b_spline(x, knots, degree - 1, i)
+  B_i1_d1 <- b_spline(x, knots, degree - 1, i + 1)
+
+  denom1 <- knots[i + degree] - knots[i]
+  denom2 <- knots[i + degree + 1] - knots[i + 1]
+
+  term1 <- if (denom1 == 0) 0 else ((x - knots[i])/denom1)*B_i_d1
+  term2 <- if (denom2 == 0) 0 else ((knots[i + degree + 1] - x)/denom2)*B_i1_d1
+
+  return(term1 + term2)
+}
+```
+
+
+## Definition Design Matrix of B-spline Basis
+
+```{r, echo= TRUE}
+# Create design matrix of B-spline basis
+
+create_design_matrix <- function(x_values, knots, degree){
+  n <- length(x_values) # number of the data
+  num_basis <- length(knots) - degree - 1 # number of the basis function
+
+  design_matrix <- matrix(0, nrow = n, ncol = num_basis)
+
+  for (j in 1:num_basis){
+    for (i in 1:n){
+      design_matrix[i, j] <- b_spline(x_values[i], knots, degree, j)
+    }
+  }
+
+  return(design_matrix)
+}
+```
+
+
+## Fitting P-spline Model
+
+```{r, echo= TRUE}
+fit_pspline <- function(x_values, y_values,
+                        interior_knots, degree = 3,
+                        lambda = 0.01, diff_order = 2){
+
+  knots <- add_boundary_knots(x_values, interior_knots, degree)
+
+  G <- create_design_matrix(x_values, knots, degree)
+  # Design Matrix of B-spline
+
+  num_basis <- ncol(G)
+  D <- diff(diag(num_basis), differences = diff_order)
+
+  P <- t(D) %*% D # Penalty Matrix
+
+  beta_hat <- solve(t(G) %*% G + lambda * P) %*% t(G) %*% y_values
+
+  return(list(beta = beta_hat, knots = knots,
+              degree = degree, lambda = lambda,
+              penalty = P))
+}
+```
+
+
+## Predicting the Values of Data Based on P-spline
+
+```{r, echo= TRUE}
+predict_pspline <- function(model, new_x){
+  G_new = create_design_matrix(new_x, model$knots, model$degree)
+  y_pred = G_new %*% model$beta
+  return(y_pred)
+}
+```
+
+
+## Plotting P-spline with Scatter Plots
+
+```{r, echo= TRUE}
+library(ggplot2)
+
+plot_pspline <- function(x_values, y_values, model, grid_x, num_knots, lambda,
+        point_size, line_size){
+  y_pred = predict_pspline(model, grid_x)
+  data_plot = data.frame(x = x_values, y = y_values)
+  spline_plot = data.frame(x = grid_x, y = y_pred)
+
+  ggplot() +
+    geom_point(data = data_plot, aes(x, y),
+               color = "blue", size= point_size) +
+    geom_line(data = spline_plot, aes(x, y),
+              color = "red", linewidth = line_size) +
+    labs(title =
+        sprintf("Fitted P-spline Regression (knots= %d, lambda= %.2f)",
+        num_knots, lambda), x = "x", y = "y") +
+    xlim(c(min(x_values), max(x_values)))
+}
+```
+
+
+# Apply Data set
+
+## Generating Data set
+
+```{r, echo= TRUE}
+set.seed(924)
+n= 100
+x_values= sort(runif(n, 0, 1))
+y_values= sin(2*pi*x_values) + cos(4*pi*x_values) + rnorm(n, sd= 0.2)
+```
+
+
+## Using **P-spline** Package
+
+```{r, echo= TRUE, eval= FALSE}
+# devtools::install_github('Ga-young-Moon/Penalized-B-spline')
+library(Pspline)
+
+# spline degree specification
+degree= 3
+
+# knot generation
+num_interior= 5
+interior_knots= knots_quantile(x_values, num_interior)
+
+# setting the value of lambda
+# and the difference penalty order
+lambda= 1e-2
+diff_order= 2
+
+# model fitting
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+```
+
+```{r, echo= FALSE, eval= TRUE}
+# devtools::install_github('Ga-young-Moon/Penalized-B-spline')
+library(Pspline)
+
+# spline degree specification
+degree= 3
+
+# knot generation
+num_interior= 5
+interior_knots= knots_quantile(x_values, num_interior)
+
+# setting the value of lambda
+# and the difference penalty order
+lambda= 1e-2
+diff_order= 2
+
+# model fitting
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+```
+
+
+## Drawing the Plot of Data Point
+
+```{r, echo= TRUE, out.width= '87%', fig.align='center'}
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, 5, 1e-2, 1.5, 0.5)
+```
+
+
+## Plot Shape According to Number of Knots (Knots= 7)
+
+- From the plot above, we can see that when there are 5 knots, the spline curve does not follow the data very well. \newline
+$\rightarrow$ Therefore, we need to check the plot when the number of knots is increased.
+
+- If the number of knots is 7:
+
+```{r, echo= FALSE, eval= TRUE, , out.width= '87%', fig.align='center'}
+num_interior= 7
+interior_knots= knots_quantile(x_values, num_interior)
+lambda= 1e-2
+diff_order= 2
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, num_interior, lambda, 1.5, 0.5)
+```
+
+
+## Plot Shape According to Number of Knots (Knots= 15)
+
+- If the number of knots is 15:
+
+```{r, echo= FALSE, eval= TRUE, out.width= '87%', fig.align='center'}
+num_interior= 15
+interior_knots= knots_quantile(x_values, num_interior)
+lambda= 1e-2
+diff_order= 2
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, num_interior, lambda, 1.5, 0.5)
+```
+
+
+## Plot Shape According to Number of Knots (Knots= 25)
+
+- If the number of knots is 25:
+
+```{r, echo= FALSE, eval= TRUE, out.width= '87%', fig.align='center'}
+num_interior= 25
+interior_knots= knots_quantile(x_values, num_interior)
+lambda= 1e-2
+diff_order= 2
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, num_interior, lambda, 1.5, 0.5)
+```
+
+- As the number of knots increases, we can see that the spline model becomes more flexible.
+
+
+## Plot Shape According to Value of $\lambda$ ($\lambda$ = 0.01)
+
+- Then, we can also see how the plot changes depending on $\lambda$ value.
+
+```{r, echo= FALSE, eval= TRUE, out.width= '87%', fig.align='center'}
+num_interior= 25
+interior_knots= knots_quantile(x_values, num_interior)
+lambda= 1e-2
+diff_order= 2
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, num_interior, lambda, 1.5, 0.5)
+```
+
+
+## Plot Shape According to Value of $\lambda$ ($\lambda$ = 1)
+
+- If $\lambda$= 1:
+
+```{r, echo= FALSE, eval= TRUE, out.width= '87%', fig.align='center'}
+num_interior= 25
+interior_knots= knots_quantile(x_values, num_interior)
+lambda= 1
+diff_order= 2
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, num_interior, lambda, 1.5, 0.5)
+```
+
+
+## Plot Shape According to Value of $\lambda$ ($\lambda$ = 0.0001)
+
+- If $\lambda$= 0.0001:
+
+```{r, echo= FALSE, eval= TRUE, out.width= '87%', fig.align='center'}
+num_interior= 25
+interior_knots= knots_quantile(x_values, num_interior)
+lambda= 1e-4
+diff_order= 2
+model= fit_pspline(x_values, y_values, interior_knots,
+                   degree, lambda, diff_order)
+
+grid_x = seq(min(x_values), max(x_values), length.out = 100)
+plot_pspline(x_values, y_values, model, grid_x, num_interior, lambda, 1.5, 0.5)
+```
+
+- The smaller $\lambda$ value, the better the curve follows the data.
+
+
+## Q & A
+
+\begin{center}
+  {\bf {\Huge Q \& A}}
+\end{center}
+
+
+## 
+
+\begin{center}
+  {\bf {\Huge Thank you :)}}
+\end{center}
