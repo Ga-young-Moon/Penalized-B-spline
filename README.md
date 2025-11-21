@@ -16,7 +16,7 @@ penalized B-spline and to visualize its plot.
 You can install the development version of Pspline like so:
 
 ``` r
-devtools::install('C:/Users/user/OneDrive/문서/Rproj/Pspline')
+devtools::install_github('Ga-young-Moon/Penalized-B-spline')
 ```
 
 ## Example
